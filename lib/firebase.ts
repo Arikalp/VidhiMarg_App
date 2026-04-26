@@ -1,5 +1,6 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApps, initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, initializeAuth, type Auth, type Persistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
@@ -31,7 +32,27 @@ const firebaseConfig = {
 
 const app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
 
-const auth = getAuth(app);
+const createAuth = (): Auth => {
+  try {
+    const authModule = require('firebase/auth') as {
+      getReactNativePersistence?: (storage: typeof AsyncStorage) => unknown;
+    };
+
+    if (typeof authModule.getReactNativePersistence === 'function') {
+      const persistence = authModule.getReactNativePersistence(AsyncStorage) as Persistence;
+
+      return initializeAuth(app, {
+        persistence,
+      });
+    }
+  } catch {
+    // Fallback to default auth initialization when persistence helper is unavailable.
+  }
+
+  return getAuth(app);
+};
+
+const auth = createAuth();
 
 const db = getFirestore(app);
 const storage = getStorage(app);

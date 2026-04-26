@@ -1,17 +1,32 @@
-import { Link } from 'expo-router';
+import { useState } from 'react';
+import { Link, useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BrandTheme } from '@/constants/theme';
+import { useAuthSession } from '@/hooks/use-auth-session';
 
 export default function ProfileScreen() {
+  const router = useRouter();
+  const { user, logout } = useAuthSession();
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+
+    try {
+      await logout();
+      router.replace('/(auth)/login');
+    } finally {
+      setLoggingOut(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <Text style={styles.title}>Profile</Text>
-        <Text style={styles.subtitle}>
-          Profile read and write with users collection will be connected in Batch E.
-        </Text>
+        <Text style={styles.subtitle}>Signed in as {user?.email ?? 'Unknown user'}.</Text>
 
         <Link href="/edit-profile" asChild>
           <Pressable style={styles.primaryButton}>
@@ -19,11 +34,9 @@ export default function ProfileScreen() {
           </Pressable>
         </Link>
 
-        <Link href="/login" asChild>
-          <Pressable style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>Logout (placeholder)</Text>
-          </Pressable>
-        </Link>
+        <Pressable style={styles.secondaryButton} onPress={handleLogout} disabled={loggingOut}>
+          <Text style={styles.secondaryButtonText}>{loggingOut ? 'Logging out...' : 'Logout'}</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );

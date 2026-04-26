@@ -1,8 +1,41 @@
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
+import { useEffect } from 'react';
 
-export default function RootLayout() {
+import { BrandTheme } from '@/constants/theme';
+import { AuthSessionProvider, useAuthSession } from '@/hooks/use-auth-session';
+
+function AppNavigator() {
+  const segments = useSegments();
+  const router = useRouter();
+  const { user, initializing } = useAuthSession();
+
+  useEffect(() => {
+    if (initializing) {
+      return;
+    }
+
+    const inAuthGroup = segments[0] === '(auth)';
+
+    if (!user && !inAuthGroup) {
+      router.replace('/(auth)/login');
+    }
+
+    if (user && inAuthGroup) {
+      router.replace('/(tabs)/services');
+    }
+  }, [initializing, router, segments, user]);
+
+  if (initializing) {
+    return (
+      <View style={styles.loadingScreen}>
+        <ActivityIndicator size="large" color={BrandTheme.colors.primary} />
+      </View>
+    );
+  }
+
   return (
     <>
       <Stack screenOptions={{ headerTitleAlign: 'center' }}>
@@ -16,3 +49,20 @@ export default function RootLayout() {
     </>
   );
 }
+
+export default function RootLayout() {
+  return (
+    <AuthSessionProvider>
+      <AppNavigator />
+    </AuthSessionProvider>
+  );
+}
+
+const styles = StyleSheet.create({
+  loadingScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: BrandTheme.colors.background,
+  },
+});
