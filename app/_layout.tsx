@@ -43,6 +43,7 @@ function AppNavigator() {
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="service/[id]" options={{ title: 'Service Detail' }} />
+        <Stack.Screen name="booking" options={{ title: 'Checkout' }} />
         <Stack.Screen name="edit-profile" options={{ title: 'Edit Profile' }} />
       </Stack>
       <StatusBar style="dark" />
