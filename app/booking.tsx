@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { addDoc, collection, doc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -40,6 +40,8 @@ export default function BookingScreen() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Pay via UPI');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [profileMessage, setProfileMessage] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
   const selectedService = useMemo(() => {
     const normalize = (value: string | string[] | undefined) =>
@@ -53,64 +55,63 @@ export default function BookingScreen() {
     return { title, price, category, serviceType };
   }, [params.category, params.price, params.serviceType, params.title]);
 
-  useEffect(() => {
-    let isMounted = true;
+  const loadProfile = useCallback(async (showLoader: boolean) => {
+    if (!user?.uid) {
+      setProfileDetails(EMPTY_PROFILE);
+      setProfileMessage('');
+      if (showLoader) {
+        setProfileLoading(false);
+      }
+      return;
+    }
 
-    const loadProfile = async () => {
-      if (!user?.uid) {
-        if (isMounted) {
-          setProfileDetails(EMPTY_PROFILE);
-          setProfileLoading(false);
-        }
+    if (showLoader) {
+      setProfileLoading(true);
+    }
+    setProfileMessage('');
+
+    const fallbackProfile: ProfileDetails = {
+      fullName: user.displayName ?? '',
+      email: user.email ?? '',
+      contactNumber: user.phoneNumber ?? '',
+      homeAddress: '',
+    };
+
+    try {
+      const snapshot = await getDoc(doc(db, 'users', user.uid));
+
+      if (!snapshot.exists()) {
+        setProfileDetails(fallbackProfile);
         return;
       }
 
-      setProfileLoading(true);
+      const data = snapshot.data() as Partial<ProfileDetails>;
 
-      const fallbackProfile: ProfileDetails = {
-        fullName: user.displayName ?? '',
-        email: user.email ?? '',
-        contactNumber: user.phoneNumber ?? '',
-        homeAddress: '',
-      };
-
-      try {
-        const snapshot = await getDoc(doc(db, 'users', user.uid));
-
-        if (!isMounted) {
-          return;
-        }
-
-        if (!snapshot.exists()) {
-          setProfileDetails(fallbackProfile);
-          return;
-        }
-
-        const data = snapshot.data() as Partial<ProfileDetails>;
-
-        setProfileDetails({
-          fullName: data.fullName ?? fallbackProfile.fullName,
-          email: data.email ?? fallbackProfile.email,
-          contactNumber: data.contactNumber ?? fallbackProfile.contactNumber,
-          homeAddress: data.homeAddress ?? fallbackProfile.homeAddress,
-        });
-      } catch {
-        if (isMounted) {
-          setProfileDetails(fallbackProfile);
-        }
-      } finally {
-        if (isMounted) {
-          setProfileLoading(false);
-        }
+      setProfileDetails({
+        fullName: data.fullName ?? fallbackProfile.fullName,
+        email: data.email ?? fallbackProfile.email,
+        contactNumber: data.contactNumber ?? fallbackProfile.contactNumber,
+        homeAddress: data.homeAddress ?? fallbackProfile.homeAddress,
+      });
+    } catch {
+      setProfileDetails(fallbackProfile);
+      setProfileMessage('Unable to refresh profile details. Pull to retry.');
+    } finally {
+      if (showLoader) {
+        setProfileLoading(false);
       }
-    };
-
-    loadProfile();
-
-    return () => {
-      isMounted = false;
-    };
+    }
   }, [user]);
+
+  useEffect(() => {
+    void loadProfile(true);
+  }, [loadProfile]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadProfile(false);
+    setRefreshing(false);
+  };
 
   const handleConfirmBooking = async () => {
     if (!user?.uid) {
@@ -147,7 +148,15 @@ export default function BookingScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={BrandTheme.colors.primary}
+          />
+        }>
         <Text style={styles.title}>Checkout</Text>
         <Text style={styles.subtitle}>Confirm your service and payment method before submitting.</Text>
 
@@ -195,6 +204,8 @@ export default function BookingScreen() {
           <Text style={styles.profileRow}>Email: {profileLoading ? 'Loading...' : profileDetails.email || 'Not provided'}</Text>
           <Text style={styles.profileRow}>Phone: {profileLoading ? 'Loading...' : profileDetails.contactNumber || 'Not provided'}</Text>
           <Text style={styles.profileRow}>Address: {profileLoading ? 'Loading...' : profileDetails.homeAddress || 'Not provided'}</Text>
+
+          {profileMessage ? <Text style={styles.profileMessage}>{profileMessage}</Text> : null}
 
           <Pressable style={styles.linkButton} onPress={() => router.push('/edit-profile')}>
             <Text style={styles.linkButtonText}>Edit profile details</Text>
@@ -307,6 +318,11 @@ const styles = StyleSheet.create({
     color: BrandTheme.colors.onSurfaceVariant,
     fontSize: 13,
     lineHeight: 19,
+  },
+  profileMessage: {
+    color: BrandTheme.colors.error,
+    fontSize: 12,
+    lineHeight: 18,
   },
   linkButton: {
     marginTop: 6,

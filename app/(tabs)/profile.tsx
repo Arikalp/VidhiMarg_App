@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 
@@ -79,6 +79,7 @@ export default function ProfileScreen() {
   const [isRequestsLoading, setIsRequestsLoading] = useState(false);
   const [requestMessage, setRequestMessage] = useState('');
   const [loadMessage, setLoadMessage] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
   const resolvedName = useMemo(() => {
     if (profileDetails.fullName.trim()) {
@@ -88,106 +89,96 @@ export default function ProfileScreen() {
     return user?.displayName?.trim() || 'Your Name';
   }, [profileDetails.fullName, user?.displayName]);
 
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadProfileAndRequests = async () => {
-      if (!user?.uid) {
-        if (isMounted) {
-          setProfileDetails(EMPTY_PROFILE);
-          setBookingRequests([]);
-          setIsProfileLoading(false);
-          setIsRequestsLoading(false);
-          setLoadMessage('');
-          setRequestMessage('');
-        }
-        return;
+  const loadProfileAndRequests = useCallback(async (showInitialLoader: boolean) => {
+    if (!user?.uid) {
+      setProfileDetails(EMPTY_PROFILE);
+      setBookingRequests([]);
+      if (showInitialLoader) {
+        setIsProfileLoading(false);
+        setIsRequestsLoading(false);
       }
-
       setLoadMessage('');
       setRequestMessage('');
+      return;
+    }
+
+    setLoadMessage('');
+    setRequestMessage('');
+    if (showInitialLoader) {
       setIsProfileLoading(true);
       setIsRequestsLoading(true);
+    }
 
-      const fallbackProfile: ProfileDetails = {
-        fullName: user.displayName ?? '',
-        contactNumber: user.phoneNumber ?? '',
-        email: user.email ?? '',
-        homeAddress: '',
-        profileImage: user.photoURL ?? FALLBACK_PROFILE_IMAGE,
-      };
-
-      try {
-        const profileSnapshot = await getDoc(doc(db, 'users', user.uid));
-
-        if (!isMounted) {
-          return;
-        }
-
-        if (profileSnapshot.exists()) {
-          const data = profileSnapshot.data() as Partial<ProfileDetails>;
-
-          setProfileDetails({
-            fullName: data.fullName ?? fallbackProfile.fullName,
-            contactNumber: data.contactNumber ?? fallbackProfile.contactNumber,
-            email: data.email ?? fallbackProfile.email,
-            homeAddress: data.homeAddress ?? fallbackProfile.homeAddress,
-            profileImage: data.profileImage ?? fallbackProfile.profileImage,
-          });
-        } else {
-          setProfileDetails(fallbackProfile);
-        }
-      } catch {
-        if (isMounted) {
-          setProfileDetails(fallbackProfile);
-          setLoadMessage('Could not fetch saved profile details.');
-        }
-      } finally {
-        if (isMounted) {
-          setIsProfileLoading(false);
-        }
-      }
-
-      try {
-        const requestsSnapshot = await getDocs(query(collection(db, 'bookings'), where('userId', '==', user.uid)));
-
-        if (!isMounted) {
-          return;
-        }
-
-        const requests = requestsSnapshot.docs
-          .map((snapshot) => {
-            const data = snapshot.data() as Omit<BookingRequest, 'id'>;
-
-            return {
-              id: snapshot.id,
-              ...data,
-            };
-          })
-          .sort(
-            (first, second) =>
-              getRequestTimestamp(second.createdAt) - getRequestTimestamp(first.createdAt)
-          );
-
-        setBookingRequests(requests);
-      } catch {
-        if (isMounted) {
-          setRequestMessage('Could not fetch your service requests right now.');
-          setBookingRequests([]);
-        }
-      } finally {
-        if (isMounted) {
-          setIsRequestsLoading(false);
-        }
-      }
+    const fallbackProfile: ProfileDetails = {
+      fullName: user.displayName ?? '',
+      contactNumber: user.phoneNumber ?? '',
+      email: user.email ?? '',
+      homeAddress: '',
+      profileImage: user.photoURL ?? FALLBACK_PROFILE_IMAGE,
     };
 
-    void loadProfileAndRequests();
+    try {
+      const profileSnapshot = await getDoc(doc(db, 'users', user.uid));
 
-    return () => {
-      isMounted = false;
-    };
+      if (profileSnapshot.exists()) {
+        const data = profileSnapshot.data() as Partial<ProfileDetails>;
+
+        setProfileDetails({
+          fullName: data.fullName ?? fallbackProfile.fullName,
+          contactNumber: data.contactNumber ?? fallbackProfile.contactNumber,
+          email: data.email ?? fallbackProfile.email,
+          homeAddress: data.homeAddress ?? fallbackProfile.homeAddress,
+          profileImage: data.profileImage ?? fallbackProfile.profileImage,
+        });
+      } else {
+        setProfileDetails(fallbackProfile);
+      }
+    } catch {
+      setProfileDetails(fallbackProfile);
+      setLoadMessage('Could not fetch saved profile details.');
+    } finally {
+      if (showInitialLoader) {
+        setIsProfileLoading(false);
+      }
+    }
+
+    try {
+      const requestsSnapshot = await getDocs(query(collection(db, 'bookings'), where('userId', '==', user.uid)));
+
+      const requests = requestsSnapshot.docs
+        .map((snapshot) => {
+          const data = snapshot.data() as Omit<BookingRequest, 'id'>;
+
+          return {
+            id: snapshot.id,
+            ...data,
+          };
+        })
+        .sort(
+          (first, second) =>
+            getRequestTimestamp(second.createdAt) - getRequestTimestamp(first.createdAt)
+        );
+
+      setBookingRequests(requests);
+    } catch {
+      setRequestMessage('Could not fetch your service requests right now.');
+      setBookingRequests([]);
+    } finally {
+      if (showInitialLoader) {
+        setIsRequestsLoading(false);
+      }
+    }
   }, [user]);
+
+  useEffect(() => {
+    void loadProfileAndRequests(true);
+  }, [loadProfileAndRequests]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadProfileAndRequests(false);
+    setRefreshing(false);
+  };
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -202,7 +193,15 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={BrandTheme.colors.primary}
+          />
+        }>
         <Text style={styles.title}>Profile</Text>
         <Text style={styles.subtitle}>Manage your details and review your service requests.</Text>
 
@@ -240,7 +239,12 @@ export default function ProfileScreen() {
           {isRequestsLoading ? <Text style={styles.requestSubtle}>Loading your requests...</Text> : null}
           {!isRequestsLoading && requestMessage ? <Text style={styles.errorText}>{requestMessage}</Text> : null}
           {!isRequestsLoading && !requestMessage && bookingRequests.length === 0 ? (
-            <Text style={styles.requestSubtle}>You have not made any service requests yet.</Text>
+            <View style={styles.emptyRequestState}>
+              <Text style={styles.requestSubtle}>You have not made any service requests yet.</Text>
+              <Pressable style={styles.emptyActionButton} onPress={() => router.push('/(tabs)/services')}>
+                <Text style={styles.emptyActionButtonText}>Explore services</Text>
+              </Pressable>
+            </View>
           ) : null}
 
           {!isRequestsLoading && bookingRequests.length > 0
@@ -409,6 +413,23 @@ const styles = StyleSheet.create({
     color: BrandTheme.colors.onSurfaceVariant,
     fontSize: 13,
     lineHeight: 19,
+  },
+  emptyRequestState: {
+    gap: 10,
+  },
+  emptyActionButton: {
+    alignSelf: 'flex-start',
+    borderRadius: BrandTheme.radius.pill,
+    borderWidth: 1,
+    borderColor: BrandTheme.colors.outlineVariant,
+    backgroundColor: BrandTheme.colors.surfaceContainerLow,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  emptyActionButtonText: {
+    color: BrandTheme.colors.onSurface,
+    fontSize: 12,
+    fontWeight: '700',
   },
   requestItem: {
     borderRadius: BrandTheme.radius.xl,
